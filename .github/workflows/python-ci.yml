@@ -1,27 +1,35 @@
 name: python-ci
-
 on:
   workflow_call:
     inputs:
       repo:
         required: true
         type: string
-      project-dir:
-        description: Directory of the Python project (pyproject.toml) inside the repository
-        required: true
-        type: string
       siblings:
-        required: false
+        description: Space separated sibling repositories
         type: string
         default: ""
+      sibling-refs:
+        description: JSON mapping each sibling to a verified full commit SHA
+        type: string
+        default: "{}"
+      project-dir:
+        description: Directory containing pyproject.toml inside the repository
+        required: true
+        type: string
       native:
-        description: Build with maturin (true) or install a pure Python project (false)
-        required: false
         type: boolean
         default: false
     secrets:
       CI_TOKEN:
+        description: Optional read-only token scoped to private sibling repositories
         required: false
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   python:
@@ -30,45 +38,88 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: UniFormat/${{ inputs.repo }}
           path: ${{ inputs.repo }}
-      - name: Check out sibling repositories
-        if: inputs.siblings != ''
+          persist-credentials: false
+      - name: Validate pinned sibling revisions
         env:
-          GH_TOKEN: ${{ secrets.CI_TOKEN || github.token }}
+          SIBLINGS: ${{ inputs.siblings }}
+          SIBLING_REFS: ${{ inputs.sibling-refs }}
         run: |
-          for r in ${{ inputs.siblings }}; do
-            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/UniFormat/${r}.git" "$r"
-          done
-      - uses: actions/setup-python@v5
+          python3 - <<'PYWORKFLOW'
+          import json, os, re
+          allowed = {"uniformat-core", "uniformat-conformance", "uniformat-sas"}
+          refs = json.loads(os.environ["SIBLING_REFS"])
+          for name in os.environ["SIBLINGS"].split():
+              if name not in allowed or not re.fullmatch(r"[0-9a-f]{40}", refs.get(name, "")):
+                  raise SystemExit("Every sibling requires an allowed name and a full commit SHA")
+          PYWORKFLOW
+      - name: Check out uniformat-core
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-core ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-core
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-core'] }}
+          path: uniformat-core
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-conformance
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-conformance ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-conformance
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-conformance'] }}
+          path: uniformat-conformance
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-sas
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-sas ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-sas
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-sas'] }}
+          path: uniformat-sas
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@stable
-        if: inputs.native
-      - uses: Swatinem/rust-cache@v2
-        if: inputs.native
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ${{ inputs.repo }}
-      - name: Install uniformat-core (Python) from the sibling checkout
+      - name: Install audited dependencies
+        env:
+          REPO: ${{ inputs.repo }}
+        run: pip install --require-hashes -r "$REPO/ci/requirements-python.txt"
+      - name: Audit Python dependencies
+        env:
+          REPO: ${{ inputs.repo }}
+        run: pip-audit --no-deps --disable-pip -r "$REPO/ci/requirements-python.txt"
+      - name: Install the common Python package
         if: inputs.repo != 'uniformat-core'
-        run: pip install ./uniformat-core/python
+        run: pip install --no-deps --no-build-isolation ./uniformat-core/python
       - name: Build and install
         working-directory: ${{ inputs.repo }}/${{ inputs.project-dir }}
+        env:
+          NATIVE: ${{ inputs.native }}
         run: |
-          pip install maturin pytest pyarrow pandas polars
-          if [ "${{ inputs.native }}" = "true" ]; then
-            maturin build --release --out dist
-            pip install --force-reinstall dist/*.whl
+          if [ "$NATIVE" = "true" ]; then
+            maturin build --locked --release --out dist
+            pip install --no-deps --force-reinstall dist/*.whl
           else
-            pip install .
+            pip install --no-deps --no-build-isolation .
           fi
-      - name: Test
+      - run: pytest -q
         working-directory: ${{ inputs.repo }}/${{ inputs.project-dir }}
-        run: pytest -q
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: inputs.native
         with:
           name: wheel-${{ matrix.os }}

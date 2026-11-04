@@ -1,49 +1,98 @@
 name: r-ci
-
 on:
   workflow_call:
     inputs:
       repo:
         required: true
         type: string
+      siblings:
+        description: Space separated sibling repositories
+        type: string
+        default: ""
+      sibling-refs:
+        description: JSON mapping each sibling to a verified full commit SHA
+        type: string
+        default: "{}"
       package-dir:
         description: Directory of the R package inside the repository
         required: true
         type: string
-      siblings:
-        required: false
-        type: string
-        default: ""
     secrets:
       CI_TOKEN:
+        description: Optional read-only token scoped to private sibling repositories
         required: false
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   r-package:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: UniFormat/${{ inputs.repo }}
           path: ${{ inputs.repo }}
-      - name: Check out sibling repositories
-        if: inputs.siblings != ''
+          persist-credentials: false
+      - name: Validate pinned sibling revisions
         env:
-          GH_TOKEN: ${{ secrets.CI_TOKEN || github.token }}
+          SIBLINGS: ${{ inputs.siblings }}
+          SIBLING_REFS: ${{ inputs.sibling-refs }}
         run: |
-          for r in ${{ inputs.siblings }}; do
-            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/UniFormat/${r}.git" "$r"
-          done
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+          python3 - <<'PYWORKFLOW'
+          import json, os, re
+          allowed = {"uniformat-core", "uniformat-conformance", "uniformat-sas"}
+          refs = json.loads(os.environ["SIBLING_REFS"])
+          for name in os.environ["SIBLINGS"].split():
+              if name not in allowed or not re.fullmatch(r"[0-9a-f]{40}", refs.get(name, "")):
+                  raise SystemExit("Every sibling requires an allowed name and a full commit SHA")
+          PYWORKFLOW
+      - name: Check out uniformat-core
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-core ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-core
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-core'] }}
+          path: uniformat-core
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-conformance
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-conformance ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-conformance
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-conformance'] }}
+          path: uniformat-conformance
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-sas
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-sas ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-sas
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-sas'] }}
+          path: uniformat-sas
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ${{ inputs.repo }}
-      - uses: r-lib/actions/setup-r@v2
-      - uses: r-lib/actions/setup-r-dependencies@v2
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           working-directory: ${{ inputs.repo }}/${{ inputs.package-dir }}
           extra-packages: any::haven, any::hms, any::testthat
       - name: Install and test
+        env:
+          PACKAGE_DIR: ${{ inputs.repo }}/${{ inputs.package-dir }}
         run: |
-          R CMD INSTALL ${{ inputs.repo }}/${{ inputs.package-dir }}
-          Rscript -e 'testthat::test_dir("${{ inputs.repo }}/${{ inputs.package-dir }}/tests/testthat", package = "uniformatsas", reporter = "summary", stop_on_failure = TRUE)'
+          R CMD INSTALL "$PACKAGE_DIR"
+          Rscript -e 'testthat::test_dir(file.path(Sys.getenv("PACKAGE_DIR"), "tests/testthat"), package = "uniformatsas", reporter = "summary", stop_on_failure = TRUE)'

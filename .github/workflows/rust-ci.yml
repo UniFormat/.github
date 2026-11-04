@@ -1,26 +1,32 @@
 name: rust-ci
-
 on:
   workflow_call:
     inputs:
       repo:
-        description: Name of the calling repository (checked out as ./<repo>)
         required: true
         type: string
       siblings:
-        description: Space separated sibling repositories to check out next to it (path dependencies)
-        required: false
+        description: Space separated sibling repositories
         type: string
         default: ""
+      sibling-refs:
+        description: JSON mapping each sibling to a verified full commit SHA
+        type: string
+        default: "{}"
       extra-args:
-        description: Extra arguments for cargo test (for example --exclude crate)
-        required: false
+        description: Additional cargo test arguments (parsed as arguments, never shell code)
         type: string
         default: ""
     secrets:
       CI_TOKEN:
-        description: Token able to read private sibling repositories
+        description: Optional read-only token scoped to private sibling repositories
         required: false
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 env:
   CARGO_TERM_COLOR: always
@@ -29,39 +35,132 @@ env:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: UniFormat/${{ inputs.repo }}
           path: ${{ inputs.repo }}
-      - name: Check out sibling repositories
-        if: inputs.siblings != ''
+          persist-credentials: false
+      - name: Validate pinned sibling revisions
         env:
-          GH_TOKEN: ${{ secrets.CI_TOKEN || github.token }}
+          SIBLINGS: ${{ inputs.siblings }}
+          SIBLING_REFS: ${{ inputs.sibling-refs }}
         run: |
-          for r in ${{ inputs.siblings }}; do
-            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/UniFormat/${r}.git" "$r"
-          done
-      - uses: dtolnay/rust-toolchain@stable
+          python3 - <<'PYWORKFLOW'
+          import json, os, re
+          allowed = {"uniformat-core", "uniformat-conformance", "uniformat-sas"}
+          refs = json.loads(os.environ["SIBLING_REFS"])
+          for name in os.environ["SIBLINGS"].split():
+              if name not in allowed or not re.fullmatch(r"[0-9a-f]{40}", refs.get(name, "")):
+                  raise SystemExit("Every sibling requires an allowed name and a full commit SHA")
+          PYWORKFLOW
+      - name: Check out uniformat-core
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-core ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          repository: UniFormat/uniformat-core
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-core'] }}
+          path: uniformat-core
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-conformance
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-conformance ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-conformance
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-conformance'] }}
+          path: uniformat-conformance
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-sas
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-sas ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-sas
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-sas'] }}
+          path: uniformat-sas
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: 1.99.1
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ${{ inputs.repo }}
       - run: cargo fmt --all -- --check
         working-directory: ${{ inputs.repo }}
-      - run: cargo clippy --workspace --all-targets
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
         working-directory: ${{ inputs.repo }}
-      - run: cargo test --workspace ${{ inputs.extra-args }}
+      - name: Test (synthetic security tests are mandatory)
         working-directory: ${{ inputs.repo }}
-
+        env:
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: |
+          python3 - <<'PYWORKFLOW'
+          import os, shlex, subprocess
+          subprocess.run(["cargo", "test", "--locked", "--workspace", *shlex.split(os.environ["EXTRA_ARGS"])], check=True)
+          PYWORKFLOW
+      - name: Check parser dependency boundaries and generated tables
+        working-directory: ${{ inputs.repo }}
+        run: |
+          if [ -f ci/check_core_deps.sh ]; then
+            bash ci/check_core_deps.sh
+            python3 -I ci/gen_tables.py --check
+          fi
   deny:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: UniFormat/${{ inputs.repo }}
           path: ${{ inputs.repo }}
-      - uses: EmbarkStudios/cargo-deny-action@v2
+          persist-credentials: false
+      - name: Validate pinned sibling revisions
+        env:
+          SIBLINGS: ${{ inputs.siblings }}
+          SIBLING_REFS: ${{ inputs.sibling-refs }}
+        run: |
+          python3 - <<'PYWORKFLOW'
+          import json, os, re
+          allowed = {"uniformat-core", "uniformat-conformance", "uniformat-sas"}
+          refs = json.loads(os.environ["SIBLING_REFS"])
+          for name in os.environ["SIBLINGS"].split():
+              if name not in allowed or not re.fullmatch(r"[0-9a-f]{40}", refs.get(name, "")):
+                  raise SystemExit("Every sibling requires an allowed name and a full commit SHA")
+          PYWORKFLOW
+      - name: Check out uniformat-core
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-core ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-core
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-core'] }}
+          path: uniformat-core
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-conformance
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-conformance ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-conformance
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-conformance'] }}
+          path: uniformat-conformance
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out uniformat-sas
+        if: contains(format(' {0} ', inputs.siblings), ' uniformat-sas ')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: UniFormat/uniformat-sas
+          ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-sas'] }}
+          path: uniformat-sas
+          token: ${{ secrets.CI_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           manifest-path: ${{ inputs.repo }}/Cargo.toml
+          command: check advisories
+          arguments: --locked --all-features
+          rust-version: 1.99.1

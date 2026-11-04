@@ -10,3 +10,9 @@ GitHub Actions workflows** (`.github/workflows/`) called by every other reposito
 
 Repositories with path dependencies on a sibling (for example `uniformat-sas` → `uniformat-core`) pass the sibling names in
 `siblings`; private siblings need a `CI_TOKEN` secret able to read them. Not yet exercised on GitHub Actions.
+
+## Security controls
+
+Reusable workflows run with `contents: read`, use actions pinned to full commit SHAs, and never persist checkout credentials. `CI_TOKEN`, when needed for private siblings, must have read-only access to those repositories. Callers pass `sibling-refs` as a JSON mapping of each sibling to a full commit SHA; missing or mutable revisions fail validation. The audit job checks out the same siblings as the build job and scans development dependencies as well as production dependencies.
+
+Keep each caller pinned to the reviewed commit of these workflows. Python jobs install the caller's `ci/requirements-python.txt` with hashes and audit that resolution. Update pins and lockfiles through reviewed changes, then rerun the security tests. Rust corpus tests are explicitly ignored by default; synthetic security tests must run in normal CI. The private SAS conformance corpus is an additional validation step, not a prerequisite for security checks.
