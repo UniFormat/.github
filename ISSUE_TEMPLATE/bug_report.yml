@@ -1,0 +1,25 @@
+name: Bug report
+description: Something reads, writes or converts incorrectly
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Code or command line. Attach a small file if it only fails on one input (never confidential data).
+  - type: input
+    id: env
+    attributes:
+      label: Environment (OS, Rust / Python / R versions)
