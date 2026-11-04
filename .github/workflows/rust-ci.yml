@@ -1,0 +1,67 @@
+name: rust-ci
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        description: Name of the calling repository (checked out as ./<repo>)
+        required: true
+        type: string
+      siblings:
+        description: Space separated sibling repositories to check out next to it (path dependencies)
+        required: false
+        type: string
+        default: ""
+      extra-args:
+        description: Extra arguments for cargo test (for example --exclude crate)
+        required: false
+        type: string
+        default: ""
+    secrets:
+      CI_TOKEN:
+        description: Token able to read private sibling repositories
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: UniFormat/${{ inputs.repo }}
+          path: ${{ inputs.repo }}
+      - name: Check out sibling repositories
+        if: inputs.siblings != ''
+        env:
+          GH_TOKEN: ${{ secrets.CI_TOKEN || github.token }}
+        run: |
+          for r in ${{ inputs.siblings }}; do
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/UniFormat/${r}.git" "$r"
+          done
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.repo }}
+      - run: cargo fmt --all -- --check
+        working-directory: ${{ inputs.repo }}
+      - run: cargo clippy --workspace --all-targets
+        working-directory: ${{ inputs.repo }}
+      - run: cargo test --workspace ${{ inputs.extra-args }}
+        working-directory: ${{ inputs.repo }}
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: UniFormat/${{ inputs.repo }}
+          path: ${{ inputs.repo }}
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: ${{ inputs.repo }}/Cargo.toml

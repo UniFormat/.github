@@ -1,0 +1,75 @@
+name: python-ci
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        required: true
+        type: string
+      project-dir:
+        description: Directory of the Python project (pyproject.toml) inside the repository
+        required: true
+        type: string
+      siblings:
+        required: false
+        type: string
+        default: ""
+      native:
+        description: Build with maturin (true) or install a pure Python project (false)
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CI_TOKEN:
+        required: false
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: UniFormat/${{ inputs.repo }}
+          path: ${{ inputs.repo }}
+      - name: Check out sibling repositories
+        if: inputs.siblings != ''
+        env:
+          GH_TOKEN: ${{ secrets.CI_TOKEN || github.token }}
+        run: |
+          for r in ${{ inputs.siblings }}; do
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/UniFormat/${r}.git" "$r"
+          done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.native
+      - uses: Swatinem/rust-cache@v2
+        if: inputs.native
+        with:
+          workspaces: ${{ inputs.repo }}
+      - name: Install uniformat-core (Python) from the sibling checkout
+        if: inputs.repo != 'uniformat-core'
+        run: pip install ./uniformat-core/python
+      - name: Build and install
+        working-directory: ${{ inputs.repo }}/${{ inputs.project-dir }}
+        run: |
+          pip install maturin pytest pyarrow pandas polars
+          if [ "${{ inputs.native }}" = "true" ]; then
+            maturin build --release --out dist
+            pip install --force-reinstall dist/*.whl
+          else
+            pip install .
+          fi
+      - name: Test
+        working-directory: ${{ inputs.repo }}/${{ inputs.project-dir }}
+        run: pytest -q
+      - uses: actions/upload-artifact@v4
+        if: inputs.native
+        with:
+          name: wheel-${{ matrix.os }}
+          path: ${{ inputs.repo }}/${{ inputs.project-dir }}/dist/*.whl

@@ -1,0 +1,49 @@
+name: r-ci
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        required: true
+        type: string
+      package-dir:
+        description: Directory of the R package inside the repository
+        required: true
+        type: string
+      siblings:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      CI_TOKEN:
+        required: false
+
+jobs:
+  r-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: UniFormat/${{ inputs.repo }}
+          path: ${{ inputs.repo }}
+      - name: Check out sibling repositories
+        if: inputs.siblings != ''
+        env:
+          GH_TOKEN: ${{ secrets.CI_TOKEN || github.token }}
+        run: |
+          for r in ${{ inputs.siblings }}; do
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/UniFormat/${r}.git" "$r"
+          done
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.repo }}
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: ${{ inputs.repo }}/${{ inputs.package-dir }}
+          extra-packages: any::haven, any::hms, any::testthat
+      - name: Install and test
+        run: |
+          R CMD INSTALL ${{ inputs.repo }}/${{ inputs.package-dir }}
+          Rscript -e 'testthat::test_dir("${{ inputs.repo }}/${{ inputs.package-dir }}/tests/testthat", package = "uniformatsas", reporter = "summary", stop_on_failure = TRUE)'
