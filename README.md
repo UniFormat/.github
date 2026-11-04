@@ -9,7 +9,9 @@ GitHub Actions workflows** (`.github/workflows/`) called by every other reposito
 - `r-ci.yml` — `R CMD INSTALL` and `testthat`.
 
 Repositories with path dependencies on a sibling (for example `uniformat-sas` → `uniformat-core`) pass the sibling names in
-`siblings`; private siblings need a `CI_TOKEN` secret able to read them. Not yet exercised on GitHub Actions.
+`siblings`. Public sibling repositories need no additional credentials. `CI_TOKEN` remains an optional read-only alternative for callers using private repositories.
+
+The local `ci.yml` validates all workflow files with a pinned actionlint release on each push and pull request.
 
 ## Security controls
 

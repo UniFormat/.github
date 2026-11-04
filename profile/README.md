@@ -16,4 +16,4 @@ Rules of the family:
 - semantic versioning; dependencies between repositories use compatible ranges (`>=0.1,<0.2` while 0.x);
 - Python imports live in the `uniformat_io` namespace (`uniformat_io.core`, `uniformat_io.sas`, …).
 
-Status: pre-release (0.1). Repositories are private until the licensing review is complete.
+Status: pre-release (0.1). Source repositories are public; packages are not yet published to registries.
