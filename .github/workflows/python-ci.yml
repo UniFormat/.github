@@ -40,7 +40,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: UniFormat/${{ inputs.repo }}
           path: ${{ inputs.repo }}
@@ -60,7 +60,7 @@ jobs:
           PYWORKFLOW
       - name: Check out uniformat-core
         if: contains(format(' {0} ', inputs.siblings), ' uniformat-core ')
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: UniFormat/uniformat-core
           ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-core'] }}
@@ -69,7 +69,7 @@ jobs:
           persist-credentials: false
       - name: Check out uniformat-conformance
         if: contains(format(' {0} ', inputs.siblings), ' uniformat-conformance ')
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: UniFormat/uniformat-conformance
           ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-conformance'] }}
@@ -78,14 +78,14 @@ jobs:
           persist-credentials: false
       - name: Check out uniformat-sas
         if: contains(format(' {0} ', inputs.siblings), ' uniformat-sas ')
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: UniFormat/uniformat-sas
           ref: ${{ fromJSON(inputs.sibling-refs)['uniformat-sas'] }}
           path: uniformat-sas
           token: ${{ secrets.CI_TOKEN || github.token }}
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
@@ -119,7 +119,7 @@ jobs:
           fi
       - run: pytest -q
         working-directory: ${{ inputs.repo }}/${{ inputs.project-dir }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: inputs.native
         with:
           name: wheel-${{ matrix.os }}
